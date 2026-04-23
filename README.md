@@ -118,21 +118,75 @@ import time) so Frappe is fully initialised when it runs.
 
 ### Removing this fix once upstream ships it
 
-```bash
-bench --site <site> uninstall-app frappe_fixes
+Remove the `override_whitelisted_methods` entry for `download_pdf` from
+`hooks.py` and delete `frappe_fixes/utils/pdf.py`.
+
+---
+
+## Fix 2: Workspace sidebar preset filters — operator and value concatenated
+
+**Upstream issue:** https://github.com/frappe/frappe/issues/38838
+
+### Symptom
+
+When a workspace sidebar item has preset filters configured (e.g. *name Like
+%Admin%*), clicking the link applies the filter incorrectly. The list view
+shows the filter as `name = "like,%Admin%"` instead of `name like "%Admin%"`.
+When multiple filters are set, only the first takes effect.
+
+### Root cause
+
+`generate_route()` in `frappe/public/js/frappe/utils/utils.js` serializes
+`route_options` to URL query params via `encodeURIComponent(value)`. When
+`value` is an array `["like", "%Admin%"]`, JavaScript's implicit `.toString()`
+joins elements with a comma before encoding, producing `like%2C%25Admin%25` in
+the URL. `parse_filters_from_route_options` in `list_view.js` then reads this
+as a plain string and applies it as an `=` filter.
+
+### The fix
+
+Pre-convert array values to JSON strings before they reach `encodeURIComponent`.
+`parse_filters_from_route_options` already handles JSON array strings — it
+checks `value.startsWith("[")` and parses them correctly — so no further
+changes are needed.
+
+### How this app applies the fix without touching core files
+
+A small JS file included via `app_include_js` wraps `frappe.utils.generate_route`
+using the IIFE pattern. The wrapper converts array values in `route_options` to
+JSON strings and delegates everything else to the original function unchanged.
+
 ```
+hooks.py
+  app_include_js = "/assets/frappe_fixes/js/sidebar_filter_fix.js"
+
+public/js/sidebar_filter_fix.js
+  frappe.utils.generate_route = (function(_original) {
+      return function(item) {
+          // pre-process route_options array values → JSON strings
+          return _original.call(this, item);
+      };
+  })(frappe.utils.generate_route);
+```
+
+### Removing this fix once upstream ships it
+
+Remove the `app_include_js` entry from `hooks.py` and delete
+`frappe_fixes/public/js/sidebar_filter_fix.js`.
 
 ---
 
 ## Installation
 
 ```bash
-bench get-app https://github.com/sugarmountain/frappe_fixes
+bench get-app https://github.com/SugarMountain-CRM-Consulting/frappe_fixes
 bench --site <your-site> install-app frappe_fixes
 bench --site <your-site> migrate
 ```
 
 ## Compatibility
 
-Tested against Frappe **v16** (`version-16` branch). The race condition exists
-in the Chrome PDF generator introduced in that version.
+| Fix | Frappe versions affected |
+|---|---|
+| Fix 1: Chrome PDF race condition | v16 only |
+| Fix 2: Sidebar preset filter encoding | v16 and `develop` |
