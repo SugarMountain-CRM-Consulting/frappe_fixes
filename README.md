@@ -123,7 +123,7 @@ Remove the `override_whitelisted_methods` entry for `download_pdf` from
 
 ---
 
-## Fix 2: Workspace sidebar preset filters — operator and value concatenated
+## Fix 2: Workspace  preset filters — operator and value concatenated
 
 **Upstream issue:** https://github.com/frappe/frappe/issues/38838
 
@@ -176,6 +176,63 @@ Remove the `app_include_js` entry from `hooks.py` and delete
 
 ---
 
+## Fix 3: Notification bell dot indicator never appears (v16 sidebar redesign)
+
+**Upstream issue:** *(pending — fix branch at https://github.com/Ben-J-Amin/frappe/tree/fix/notification-bell-indicator)*
+
+### Symptom
+
+The blue dot on the notification bell (workspace sidebar and `/desk` Desktop page) never appears when there are unseen notifications. Opening the bell panel also does not clear the dot. The two bells are not in sync: clearing via the sidebar does not clear the Desktop bell and vice versa.
+
+### Root cause
+
+Four assumptions in `NotificationsView` (`frappe/public/js/frappe/ui/notifications/notifications.js`) and `desktop.html` target v15 DOM structures removed during the v16 sidebar redesign:
+
+1. **`make()` line 221** — `this.parent.find(".notifications-icon")`: `.notifications-icon` no longer exists in v16. `notifications_icon` is always an empty jQuery object, so all subsequent calls on it are no-ops.
+
+2. **`toggle_notification_icon` lines 386–388** — toggles `.notifications-seen` / `.notifications-unseen` child spans that no longer exist in the v16 DOM.
+
+3. **`setup_notification_listeners` lines 410–418** — the `show.bs.dropdown` clearing check `notifications_icon.find(".notifications-unseen").is(":visible")` is always `false` (empty object + missing spans). The workspace sidebar never fires `show.bs.dropdown` at all (it uses `.toggleClass("hidden")`), so the panel-open clearing path is entirely dead for the sidebar.
+
+4. **`desktop.html` line 28** — the bell `<button>` is missing the `.desktop-notification-icon` class. `notification.scss` targets `.desktop-notification-icon.indicator::before` for dot positioning; without the class the dot renders inline before the SVG instead of at the top-right corner of the button.
+
+Two additional issues cause the bells to fall out of sync:
+
+5. **`toggle_seen` is async-only** — `frappe.boot.notification_settings.seen` is only updated by the `indicator_hide` socket event. If the user navigates to `/desk` before that event arrives, the desktop bell re-shows the dot.
+
+6. **No same-page sync** — with socket.io unavailable (common in local dev), the `indicator_hide` realtime event never arrives, so clearing one bell never clears the other.
+
+### The fix
+
+- Resolve the correct icon element: `.desktop-notification-icon` on `/desk`, or `.sidebar-notification .sidebar-item-icon` via `.closest(".body-sidebar")` on workspace pages. Dynamically add `.desktop-notification-icon` if absent (for sites still on v16.18.2).
+- Override `toggle_notification_icon` to use `toggleClass("indicator blue", !seen)` — consistent with Frappe's existing indicator CSS.
+- Add a sidebar click handler (Fix 3a) and a corrected `show.bs.dropdown` handler (Fix 3b) that checks `hasClass("indicator")` instead of the missing `.notifications-unseen` visibility.
+- Patch `toggle_seen` to update `frappe.boot.notification_settings.seen` synchronously before the async server call.
+- Fire and subscribe to a `$(document)` event `notification_indicator_hide` so that opening either bell immediately clears the other on the same page, without requiring socket.io.
+
+### How this app applies the fix without touching core files
+
+A JS file included via `app_include_js` subclasses `frappe.ui.Notifications` and calls `_fix_notification_bell()` right after `make()`, patching the `NotificationsView` instance in place.
+
+```
+hooks.py
+  app_include_js = "/assets/frappe_fixes/js/notification_bell_fix.js"
+
+public/js/notification_bell_fix.js
+  frappe.ui.Notifications = class extends frappe.ui.Notifications {
+      make() {
+          super.make();
+          this._fix_notification_bell();  // patches view instance after construction
+      }
+  }
+```
+
+### Removing this fix once upstream ships it
+
+Remove the `app_include_js` entry for `notification_bell_fix.js` from `hooks.py` and delete `frappe_fixes/public/js/notification_bell_fix.js`.
+
+---
+
 ## Installation
 
 ```bash
@@ -190,3 +247,4 @@ bench --site <your-site> migrate
 |---|---|
 | Fix 1: Chrome PDF race condition | v16 only |
 | Fix 2: Sidebar preset filter encoding | v16 and `develop` |
+| Fix 3: Notification bell dot indicator | v16 (since sidebar redesign) |
