@@ -123,7 +123,19 @@ Remove the `override_whitelisted_methods` entry for `download_pdf` from
 
 ---
 
-## Fix 2: Workspace  preset filters — operator and value concatenated
+## Fix 2: Workspace  preset filters — operator and value concatenated (REMOVED)
+
+**Removed 2026-10-13** — fixed natively upstream as of frappe 16.51.1.
+`generate_route()` in `frappe/public/js/frappe/utils/utils.js` now does the
+same `Array.isArray(value) ? JSON.stringify(value) : value` conversion this
+patch used to add, and the new sidebar (`sidebar_item.js`'s
+`filters_as_options()`) already converts filter arrays to strings before
+`generate_route` ever sees them, so the patch had become a no-op even where
+core's own fix hadn't landed yet. Verified it wasn't masking anything by
+checking there's no double-stringify: once this patch's wrapper runs,
+`Array.isArray()` on the now-string value is false, so core's own check
+skips re-encoding it either way — same final route whether the patch runs
+or not.
 
 **Upstream issue:** https://github.com/frappe/frappe/issues/38838
 
@@ -176,7 +188,16 @@ Remove the `app_include_js` entry from `hooks.py` and delete
 
 ---
 
-## Fix 3: Notification bell dot indicator never appears (v16 sidebar redesign)
+## Fix 3: Notification bell dot indicator never appears (v16 sidebar redesign) (REMOVED)
+
+**Removed 2026-10-13** — the notification UI was redesigned again upstream by
+frappe 16.51.1, apparently fixing the underlying bug in the process. This
+patch assumed `this.dropdown` is always present on a `Notifications`
+instance, which no longer holds; calling `this.dropdown.find(...)` on the
+new structure threw a `TypeError` inside `Sidebar.setup() ->
+add_standard_items() -> setup_notifications()`, aborting sidebar rendering
+for every module sitewide, not just the notification bell. Verified the
+bell works correctly without this patch on 16.51.1 before removing it.
 
 **Upstream issue:** *(pending — fix branch at https://github.com/Ben-J-Amin/frappe/tree/fix/notification-bell-indicator)*
 
@@ -246,5 +267,5 @@ bench --site <your-site> migrate
 | Fix | Frappe versions affected |
 |---|---|
 | Fix 1: Chrome PDF race condition | v16 only |
-| Fix 2: Sidebar preset filter encoding | v16 and `develop` |
-| Fix 3: Notification bell dot indicator | v16 (since sidebar redesign) |
+| Fix 2: Sidebar preset filter encoding | v16 (exact version it was fixed natively is unconfirmed; already fixed on 16.51.1) — removed |
+| Fix 3: Notification bell dot indicator | v16 since the sidebar redesign (exact version it was fixed natively is unconfirmed; already fixed on 16.51.1) — removed |
